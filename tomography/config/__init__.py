@@ -5,3 +5,6 @@ from .param import Config
 from .scene_spiral import SceneSpiral
 from .scene_building import SceneBuilding
 from .scene_plaza import ScenePlaza
+from .scene_room import SceneRoom
+from .scene_stairs import SceneStairs
+from .scene_common import SceneCommon

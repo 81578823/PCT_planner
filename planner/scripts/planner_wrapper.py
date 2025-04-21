@@ -28,8 +28,8 @@ class TomogramPlanner(object):
         self.map_dim = []
         self.offset = None
 
-        self.start_idx = np.zeros(3, dtype=np.int32)
-        self.end_idx = np.zeros(3, dtype=np.int32)
+        self.start_idx = np.zeros(3, dtype=np.float32)
+        self.end_idx = np.zeros(3, dtype=np.float32)
 
     def loadTomogram(self, tomo_file):
         with open(self.tomo_dir + tomo_file + '.pickle', 'rb') as handle:
@@ -60,13 +60,16 @@ class TomogramPlanner(object):
         diff_g = np.abs(elev_g[1:] - elev_g[:-1])
 
         gateway_up = np.zeros_like(trav, dtype=bool)
-        mask_t = diff_t < -8.0
-        mask_g = (diff_g < 0.1) & (~np.isnan(elev_g[1:]))
+        mask_t = diff_t < -15.0
+        mask_g = (diff_g < 0.5) & (~np.isnan(elev_g[1:]))
         gateway_up[:-1] = np.logical_and(mask_t, mask_g)
+        print("np.sum(gateway_up)", np.sum(gateway_up))
+        print("np.sum(mask_t)", np.sum(mask_t))
+        print("np.sum(mask_g)", np.sum(mask_g))
 
         gateway_dn = np.zeros_like(trav, dtype=bool)
-        mask_t = diff_t > 8.0
-        mask_g = (diff_g < 0.1) & (~np.isnan(elev_g[:-1]))
+        mask_t = diff_t > 15.0
+        mask_g = (diff_g < 0.5) & (~np.isnan(elev_g[:-1]))
         gateway_dn[1:] = np.logical_and(mask_t, mask_g)
         
         gateway = np.zeros_like(trav, dtype=np.int32)
@@ -77,7 +80,7 @@ class TomogramPlanner(object):
             max_heading_rate=self.max_heading_rate, use_quintic=self.use_quintic
         )
         self.planner.init_map(
-            20, 15, self.resolution, self.n_slice, 0.2,
+            40, 30, self.resolution, self.n_slice, 0.5,
             trav.reshape(-1, trav.shape[-1]).astype(np.double),
             elev_g.reshape(-1, elev_g.shape[-1]).astype(np.double),
             elev_c.reshape(-1, elev_c.shape[-1]).astype(np.double),
@@ -86,11 +89,33 @@ class TomogramPlanner(object):
             -trav_gx.reshape(-1, trav_gx.shape[-1]).astype(np.double)
         )
 
-    def plan(self, start_pos, end_pos):
-        # TODO: calculate slice index. By default the start and end pos are all at slice 0
+    def plan(self, start_pos, end_pos, start_height=0, end_height=0):
+        """
+        规划路径的方法，支持设置起始点和终点的高度。
+
+        :param start_pos: 起始点的二维位置 (x, y)
+        :param end_pos: 终点的二维位置 (x, y)
+        :param start_height: 起始点的高度（切片索引）
+        :param end_height: 终点的高度（切片索引）
+        """
+        
+        # 将起始点和终点的二维位置转换为索引
         self.start_idx[1:] = self.pos2idx(start_pos)
         self.end_idx[1:] = self.pos2idx(end_pos)
+        
+        print("self.slice_h0:", self.slice_h0)
+        print("self.slice_dh:", self.slice_dh)
+        print("self.resolution:", self.resolution)
 
+        # print("self.center:", self.center)
+        # print("self.offset:", self.offset)
+
+        # 设置起始点和终点的高度
+        self.start_idx[0] = self.height2idx(start_height)
+        self.end_idx[0] = self.height2idx(end_height)
+        
+        # print("self.start_idx:", self.start_idx)
+        # print("self.end_idx:", self.end_idx)
         self.planner.plan(self.start_idx, self.end_idx, True)
         path_finder: a_star.Astar = self.planner.get_path_finder()
         path = path_finder.get_result_matrix()
@@ -108,6 +133,9 @@ class TomogramPlanner(object):
         traj_raw = optimizer.get_result_matrix()
         layers = optimizer.get_layers()
         heights = optimizer.get_heights()
+        
+        # print("heights:", heights[554:554+10])
+        # print("heights.shape:", heights.shape)  
 
         opt_init = np.concatenate([opt_init.transpose(1, 0), init_layer.reshape(-1, 1)], axis=-1)
         traj = np.concatenate([traj_raw, layers.reshape(-1, 1)], axis=-1)
@@ -121,4 +149,11 @@ class TomogramPlanner(object):
         pos = pos - self.center
         idx = np.round(pos / self.resolution).astype(np.int32) + self.offset
         idx = np.array([idx[1], idx[0]], dtype=np.float32)
+        return idx
+    
+    def height2idx(self, height):
+        height = height - self.slice_h0
+        # print("height:", height)
+        idx = height * self.slice_dh
+        # print("idx:", idx)
         return idx
